@@ -2,59 +2,103 @@ import time
 import re
 import pandas as pd
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+
+def close_popup_if_exists(driver):
+    try:
+        button_close = WebDriverWait(driver, 2).until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="topOfPage"]/div[16]/div/div[2]/div/div/div/div/div/button'))
+        )
+        button_close.click()
+        time.sleep(1)
+        WebDriverWait(driver, 5).until(
+            EC.invisibility_of_element_located((By.XPATH, '//*[@id="topOfPage"]/div[16]/div/div[2]/div/div/div/div/div'))
+        )
+    except TimeoutException:
+        pass
 
 
 try:
-    driver = webdriver.Chrome()
+    chrome_options = Options()
+    chrome_options.add_argument("--start-maximized")
+
+    driver = webdriver.Chrome(options=chrome_options)
 
     url = 'https://prima-coffee.com/brew/coffee'
     driver.get(url)
     time.sleep(5)
 
-    try:
-        contenedor = driver.find_element(By.XPATH, '//*[@id="topOfPage"]/div[6]/div/div[1]/main/div/div[3]/div[2]')
-    except Exception as e:
-        print("No se encontró el contenedor de productos, verifica el XPATH y que la web cargó bien.")
-        raise e
+    data = []
+    current_page = 1
 
-    productos = contenedor.find_elements(By.XPATH, './/a[contains(@class, "product")]')
+    while True:
+        close_popup_if_exists(driver)
 
-    datos = []
-    for producto in productos:
+        container = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//*[@id="topOfPage"]/div[6]/div/div[1]/main/div/div[3]/div[2]'))
+        )
+
+        products = container.find_elements(By.XPATH, './/a[contains(@class, "product")]')
+
+        for product in products:
+            try:
+                url = product.get_attribute('href')
+            except:
+                url = ''
+
+            try:
+                price_block = product.text
+            except:
+                price_block = ''
+
+            prices_found = re.findall(r'\$\s*[\d,]+(?:\.\d{2})?', price_block)
+            prices_found = [p.replace('$', '').replace(',', '').strip() for p in prices_found]
+
+            price_no_discount = ''
+            price_with_discount = ''
+            if len(prices_found) == 1:
+                price_with_discount = prices_found[0]
+            elif len(prices_found) >= 2:
+                price_no_discount = prices_found[0]
+                price_with_discount = prices_found[1]
+
+            data.append({
+                'url': url,
+                'price_no_discount': price_no_discount,
+                'price_with_discount': price_with_discount
+            })
+
+        print(f"Page {current_page}: {len(products)} products found. Total products collected: {len(data)}")
+
         try:
-            nombre = producto.find_element(By.XPATH, './/h4/a').text.strip()
-        except:
-            nombre = ''
+            next_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//a[contains(@class, 'ns-next') and @aria-label='Next']"))
+            )
+            next_class = next_button.get_attribute('class').lower()
+            if 'disabled' in next_class:
+                break
 
-        try:
-            bloque_precios = producto.text
-        except:
-            bloque_precios = ''
+            close_popup_if_exists(driver)
 
-        precios_encontrados = re.findall(r'\$\s*[\d,]+(?:\.\d{2})?', bloque_precios)
-        precios_encontrados = [p.replace('$', '').replace(',', '').strip() for p in precios_encontrados]
+            time.sleep(1)
+            next_button.click()
+            current_page += 1
+            time.sleep(5)
+        except (TimeoutException, NoSuchElementException, ElementClickInterceptedException):
+            break
 
-        precio_sin_descuento = ''
-        precio_con_descuento = ''
-        if len(precios_encontrados) == 1:
-            precio_con_descuento = precios_encontrados[0]
-        elif len(precios_encontrados) >= 2:
-            precio_sin_descuento = precios_encontrados[0]
-            precio_con_descuento = precios_encontrados[1]
+    df = pd.DataFrame(data)
+    df.to_csv('prima_coffee_products.csv', index=False, encoding='utf-8-sig')
 
-        datos.append({
-            'nombre': nombre,
-            'precio_sin_descuento': precio_sin_descuento,
-            'precio_con_descuento': precio_con_descuento
-        })
-
-    df = pd.DataFrame(datos)
-    df.to_csv('productos_prima_coffee.csv', index=False, encoding='utf-8-sig')
-    print("Datos guardados en productos_prima_coffee.csv")
+    print(f"Scraping complete. Total products extracted: {len(data)}")
 
 except Exception as err:
-    print("Error detectado:", err)
+    print(f"Error detected: {err}")
 finally:
     try:
         driver.quit()
