@@ -47,6 +47,11 @@ try:
 
         for product in products:
             try:
+                title = product.find_element(By.XPATH, './/h4/a').text.strip()
+            except:
+                title = ''
+
+            try:
                 url = product.get_attribute('href')
             except:
                 url = ''
@@ -57,20 +62,16 @@ try:
                 price_block = ''
 
             prices_found = re.findall(r'\$\s*[\d,]+(?:\.\d{2})?', price_block)
-            prices_found = [p.replace('$', '').replace(',', '').strip() for p in prices_found]
+            prices_found = [float(p.replace('$', '').replace(',', '').strip()) for p in prices_found]
 
-            price_no_discount = ''
-            price_with_discount = ''
-            if len(prices_found) == 1:
-                price_with_discount = prices_found[0]
-            elif len(prices_found) >= 2:
-                price_no_discount = prices_found[0]
-                price_with_discount = prices_found[1]
+            price = ''
+            if prices_found:
+                price = str(min(prices_found))
 
             data.append({
+                'title': title,
                 'url': url,
-                'price_no_discount': price_no_discount,
-                'price_with_discount': price_with_discount
+                'price': price
             })
 
         print(f"Page {current_page}: {len(products)} products found. Total products collected: {len(data)}")
